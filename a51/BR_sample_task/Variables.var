@@ -1,0 +1,12 @@
+VAR
+	teststruct : testStruct_typ;
+	fileIdent : UDINT;
+	offsetStruct : UDINT;
+	size : UDINT;
+	lenStruct : UDINT;
+	FileClose_0 : FileClose;
+	FileWrite_0 : FileWrite;
+	FileCreate_0 : FileCreate;
+	FileDelete_0 : FileDelete;
+	step : USINT;
+END_VAR
