@@ -1,6 +1,8 @@
 # br_struct_parser
 A JS parser to convert plc binaries of B&R structs, from a AutomationRuntime xhr.response to JSON for using it in the JS world
 
+Keywords: B&R Automation Studio, B&R AutomationRuntime, Webserver
+
 Use it directly on web root of your AutomationRuntime, to see how it works.
 B&R ST Sample task [here](https://github.com/TiloKar/br_struct_parser/tree/master/a51/BR_sample_task)
 
