@@ -302,4 +302,75 @@ class BinaryBRStructFile {
 		}
 		return BITCNT;
 	}
+
+  /**
+    eine rundungsfunktion mit angabe der nachkommastellen
+  */
+  static round(wert, dez) {
+      var hlp = Math.pow(10,dez)
+      return Math.floor(wert * hlp) / hlp;
+  }
+  /**
+  gibt die default totbandeinstellung für die trend filter zurück,
+  abhängig vom unit string der kanalklasse
+  */
+  static getDeadbandFromUnitStr(unitstr){
+    switch(unitstr) {
+      case '°C':
+        return 0.5;
+      break;
+      case 'mbar':
+        return 50;
+      break;
+      case '%':
+      case 'g':
+      case 'ml/min':
+        return 1;
+      break;
+      case 'rpm':
+        return 10;
+      break;
+      case 'S/m':
+        return 0.0005;
+      break;
+      default:
+        return 0.5;
+
+    }
+  }
+  /**
+  gibt die default digits für die event ausgaben zurück,
+  abhängig vom unit string der kanalklasse
+  */
+  static getDigitsFromUnitStr(unitstr){
+    switch(unitstr) {
+      case '°C':
+        return 1;
+      break;
+      case 'mbar':
+      case '%':
+      case 'g':
+      case 'rpm':
+      case 'ml/min':
+        return 0;
+      break;
+      case '%':
+      case 'g':
+        return 1;
+      break;
+      case 'S/m':
+        return 4;
+      break;
+      default:
+        return 3;
+
+    }
+  }
+
+  /**
+  rundet abhängig vom unit string
+  */
+  static roundWithUnit(wert, unit) {
+    return BinaryBRStructFile.round(wert,BinaryBRStructFile.getDigitsFromUnitStr(unit));
+  }
 }

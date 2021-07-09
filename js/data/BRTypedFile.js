@@ -3,6 +3,8 @@
  *@author TK, 04/2021, version 1.0.1
                         - 1.0.2   Vehalten für meherer typdaten debugged
                                   Verhalten für parseTypedFiles aus verschiedenen subdomains debugged
+
+                                  to do string arrays unbehandelt
  *
 */
 
@@ -12,17 +14,18 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
    * bereitet name und typstring in BRStructType[] auf
    */
 
-  static parseTypedFiles(){
+  static parseTypedFiles(callback){
     //klassenvariablen mit Dateinamen im typ ordner
-    this.BR_TYPE_FILES =[
+    BinaryBRTypedFile.BR_TYPE_FILES =[
        "myStruct"
-       //,"fatdumb"
+      // "fatdumb"
        //mit komma weitere dateien einhängen...
     ];
     //hier werden rohinformationen der Structs abgelegt
-    this.brStructs = [];
+    BinaryBRTypedFile.brStructs = [];
     //zähler für gefundene structs, interne nutzung
-    this.brStructsParsed = 0;
+    BinaryBRTypedFile.brStructsParsed = 0;
+    BinaryBRTypedFile.filesParsed = 0;
 
     var rq = new Array(BinaryBRTypedFile.BR_TYPE_FILES.length);
 
@@ -40,7 +43,7 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
         while (s.indexOf(":STRUCT")!=-1){//alle struct container übernehmen und splitten
           var n=s.substr(0,s.indexOf(":STRUCT")); //holt structname
           if (BinaryBRTypedFile.brStructs.find(parsed_structs_e => parsed_structs_e.name==n)!=undefined) {
-            alert("multiple use of " + n + " in B&R structfile: " + BR_TYPE_FILES_Element);
+            alert("multiple use of " + n + " in B&R structfile: " + typ_e);
             return 0;
           }else{
             var struct = new BRStructType(n);//erzeugt neue hüllklasse
@@ -71,12 +74,22 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
           BinaryBRTypedFile.brStructs.push(struct); //object
           BinaryBRTypedFile.brStructsParsed++;
         }//end_while
-        //zukünftiger platz für call des eventHandlers in HMI nach parsen der letzten StructDatei
-        if (BinaryBRTypedFile.brStructsParsed == BinaryBRTypedFile.BR_TYPE_FILES.length) {
-            //alert(BinaryBRTypedFile.brStructs[0].brRawParse);
+        BinaryBRTypedFile.filesParsed++;
+        if (BinaryBRTypedFile.filesParsed === BinaryBRTypedFile.BR_TYPE_FILES.length){
+          //alert(callback);
+          BinaryBRTypedFile.brStructs.forEach(function(struct_e, index){  //geht durch erzeugte structs und hängt wert für nachkorrektur an
+            //alert(BinaryBRTypedFile.getCorrectionOperatorFromRawParse(struct_e.brRawParse));
+            BinaryBRTypedFile.brStructs[index].moduloOperatorForOffsetCorrection=BinaryBRTypedFile.getCorrectionOperatorFromRawParse(struct_e.brRawParse);
+          });
+
+          if (typeof(callback) != "undefined") {
+            callback();
+          }else {
+            //alert(BinaryBRTypedFile.filesParsed);
+          }
         }
-        //alert("empfang" + BinaryBRTypedFile.brStructsParsed);
       };
+
       rq[index].send();
     });
   }
@@ -88,33 +101,89 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
   constructor(b,defname){
     super(b);
     this.bytesRead=this.offset;
-    this.elements = this.makeStructNodes(defname).node;
+    try {
+      this.elements = this.makeStructNodes(defname).node;
+    }catch(e){
+      alert(e);
+    }
     this.bytesRead=this.offset - this.bytesRead //letzte offsetverschiebung zurücknehmen (gilt erst für weiteren speicherbereich)
   }
+  /** diese rekursive funktion ermittelt den ntsprechenden operator
+  für die offset korrektur für eine strukturdefinition
+
+  */
+  static getCorrectionOperatorFromRawParse(rawParse,debug){
+    var back=0;
+    var check;
+    rawParse.forEach(function(rawParseElement, index){
+      check=BinaryBRTypedFile.getCorrectionOperatorFromTypeString(rawParseElement[1]);
+      if (check===false){ //ist wiederum ein sruct
+        trimmedStructname=rawParseElement[1];
+        if (trimmedStructname.indexOf("ARRAY")!=-1){ //bei bedarf array sytax raustrimmen
+          var trimmedStructname=trimmedStructname.substr(trimmedStructname.indexOf("OF") + 2);
+        }
+        var fund=BinaryBRTypedFile.brStructs.find(parsed_structs_e => parsed_structs_e.name==trimmedStructname);
+        if (fund!=undefined) {
+          check=BinaryBRTypedFile.getCorrectionOperatorFromRawParse(fund.brRawParse); //rekursionstiefe erhöhen
+          if (check > back) back=check;
+        }else {
+          alert("no type definition for " + trimmedStructname+ " in preparsed structs");
+          return false;
+        }
+      }else{
+       if (check > back) back=check;
+      }
+    });
+    return back;
+  }
+  /** prüft einen string, ob dieser einem atomaen
+    Datentyp oder einem array davon entspricht und gibt dann den entsprechenden operator
+    für die offset korrektur zurück
+  */
+  static getCorrectionOperatorFromTypeString(typeString){
+    if (typeString.indexOf("UDINT")!=-1) return 4;
+    if (typeString.indexOf("DINT")!=-1) return 4;
+    if (typeString.indexOf("USINT")!=-1) return 0;
+    if (typeString.indexOf("SINT")!=-1) return 0;
+    if (typeString.indexOf("UINT")!=-1) return 2;
+    if (typeString.indexOf("INT")!=-1) return 2;
+    if (typeString.indexOf("BOOL")!=-1) return 0;
+    if (typeString.indexOf("STRING")!=-1) return 0;
+    if (typeString.indexOf("DATE_AND_TIME")!=-1) return 4;
+    if (typeString.indexOf("REAL")!=-1) return 4;
+    return false;
+  }
+
   /**
     hängt kindelement in elternknoten eine
-    @param node  ref auf  Elternelement
-    @param nodeName  name des einzuhängenden value-blattes oder object-knotens
     @param nodeType getrimmter B&R typstring aus strkturdefinitione
   */
-  makeStructNodes(nodeType){ //nodeName raus, der kann immer aus structdef entnommen werden und node wird vor dem eigentlichen call erzeugt!
+  makeStructNodes(nodeType,debug){ //nodeName raus, der kann immer aus structdef entnommen werden und node wird vor dem eigentlichen call erzeugt!
     //alert("start rek: " + node);
+    var debugMode;
+    var debugType="nichts";
     var out=new Object();
     out.corrected = 0;
     var atomarType = this.isAtomarBRType(nodeType);
     if (atomarType===true) {//echter atomarer Typ, außer STRING als blatt
-      out.corrected=this.correctOffset(nodeType);
+      out.corrected = BinaryBRTypedFile.getCorrectionOperatorFromTypeString(nodeType)
+      if (out.corrected===false) alert("false at operator, at: " + nodeType);
+      if (debug === true)
+        if (debugType===nodeType)alert(nodeType + " at " + this.offset + " now correcting with " + out.corrected);
+      if (out.corrected > 0) while ((this.offset % out.corrected)!=0)this.offset++; //vorkorektur atomar
+      if (debug === true)
+        if (debugType===nodeType)alert(nodeType + " now at " + this.offset);
       out.node=this.makeAtomarValue(nodeType);
       return out;
       //alert(node[nodeName]);
     }else if (Number.isInteger(atomarType)){//atomarer String als blatt
-      out.corrected = this.correctOffset("STRING");
+      out.corrected = 0;//this.correctOffset("STRING");           //keine vorkorektur
       out.node = this.makeAtomarValue("STRING",atomarType);
       return out;
     }else if (nodeType.indexOf("ARRAY")!=-1){ //array marker erkannt, behandeln....
       if (nodeType.indexOf(",")!=-1){
         alert("unhandled unidimensional array: "+ nodeType + " , parsing stopped! ");
-        out.corrected = 0;
+        //out.corrected = 0;
         out.node = false;
         return out;
       }
@@ -130,22 +199,27 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
       var node=new Array(arLen);
       var atomarArType = this.isAtomarBRType(arTypeStr);
       if (atomarArType===true) {//echter atomarer Typ, außer STRING als array
-        out.corrected = this.correctOffset(arTypeStr);
+        //out.corrected = this.correctOffset(arTypeStr);
+        out.corrected = BinaryBRTypedFile.getCorrectionOperatorFromTypeString(arTypeStr) //vorkorektur atomar array
+        if (out.corrected > 0) while ((this.offset % out.corrected)!=0)this.offset++;
         for (var indexArray=0; indexArray < arLen; indexArray++)
           node[indexArray]=this.makeAtomarValue(arTypeStr);
         out.node=node;
         return out;
       }else if (Number.isInteger(atomarArType)){//atomarer String als array
-        out.corrected = this.correctOffset("STRING");
+        out.corrected = 0;//this.correctOffset("STRING");       //keine vorkorektur
         for (var indexArray=0; indexArray < arLen; indexArray++)
           node[indexArray]=this.makeAtomarValue("STRING",arTypeStr);
         out.node=node;
         return out;
       }else{ //struct als array
+      //  if (arTypeStr==="rem_trend_typ")alert("o: " + this.offset + " l: " + arLen);
         for (var indexArray=0; indexArray < arLen; indexArray++){ //wegen prüfung an elemnt 1, schleife an 1 durchzählen
-          //if (arTypeStr == 'file_cal_typ') alert ("offset cCL now: " + this.offset);
+          //if (arTypeStr == 'cCL_rem_typ') alert ("offset " + arTypeStr + " struct array item now: " + this.offset);
           var back= new Object();
-          back=this.makeStructNodes(arTypeStr); //für alle struct[] rekursionstiefe erhöhen
+
+        //  debugMode = (arTypeStr === 'PIDpar_typ');
+          back=this.makeStructNodes(arTypeStr,debugMode); //für alle struct[] rekursionstiefe erhöhen
           node[indexArray] = back.node;
         }
         //letztes elment pauschal zur ermittlung des korekturoffsets nutzen
@@ -154,6 +228,7 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
         return out;
       }
     }else{//struct als blatt auflösen
+      //if (nodeType==="df_channel_header_typ")alert("o: " + this.offset + " l: " + arLen);
       var fund=BinaryBRTypedFile.brStructs.find(parsed_structs_e => parsed_structs_e.name==nodeType);
       if (fund==undefined){
         alert("structname: " + nodeType + " unknown, parsing stopped!");
@@ -161,35 +236,66 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
         out.node = false;
         return out;
       }else{ //über alle Elemente der Strukturdefinition iterieren und rekursionstiefe erhöhen
+        //if (nodeType==="valveArraySlot_typ")alert(this.offset);
+        out.corrected = fund.moduloOperatorForOffsetCorrection;
+        if (debug === true){
+          if (debugType===nodeType)alert(nodeType + " at " + this.offset + " now precorrecting with " + out.corrected);
+          //alert(debugType);
+        }
+        if (out.corrected > 0) while ((this.offset % out.corrected)!=0)this.offset++;  //vorkorrektur
+        if (debug === true)
+          if (debugType===nodeType)alert(nodeType + " after precorr. at " + this.offset);
         var node = new Object;
       //  if (nodeType == 'seq_Slot_typ') alert ("offset for: " + nodeType + " at : " + this.offset);
-        for (var indexArray=0; indexArray < fund.brRawParse.length; indexArray++){
+        for (var indexStruct=0; indexStruct < fund.brRawParse.length; indexStruct++){
           try {
-            //if (fund.brRawParse[indexArray][0] == 'changed') alert ("offset for vname: " + fund.brRawParse[indexArray][0] + " at: " + this.offset);
+            /*
+              !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                wichtige debugging zeile
+
+            */
+
+
+            debugMode = (fund.brRawParse[indexStruct][0] === 'par');
+
+
+            /*
+              !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                wichtige debugging zeile
+
+            */
+
             var back= new Object();
-            back = this.makeStructNodes(fund.brRawParse[indexArray][1]);
-            node[fund.brRawParse[indexArray][0]] = back.node;
-            if (back.corrected > out.corrected) out.corrected = back.corrected; //hier Modulooperator abhängig von unterelmenten setzen, je nach enthaltenen unterelementen 0, 2 oder 4
+            back = this.makeStructNodes(fund.brRawParse[indexStruct][1],debugMode);
+            node[fund.brRawParse[indexStruct][0]] = back.node;
+          //  if (back.corrected > out.corrected) out.corrected = back.corrected; //hier Modulooperator abhängig von unterelmenten setzen, je nach enthaltenen unterelementen 0, 2 oder 4
           } catch (e) {
-            alert("parsing struct fails at offset: " + this.offset + " for: " + fund.brRawParse[indexArray][0] + ":" + fund.brRawParse[indexArray][1] + "with exception: " + e);
+            throw "parsing struct fails at offset: " + this.offset + " for: " + fund.brRawParse[indexStruct][0] + ":" + fund.brRawParse[indexStruct][1] + "with exception: " + e;
+
           } finally {
 
           }
         }
-        if (out.corrected > 0) while ((this.offset % out.corrected)!=0)this.offset++;//nachgelagerte korrektur nach fertigstellung eines structs, intern dynamische entscheidung auf welches vielfaches
+        if (out.corrected > 0) while ((this.offset % out.corrected)!=0)this.offset++;  //nachkorrektur
+        if (debug === true)
+          if (debugType===nodeType)alert(nodeType + " after postcorr. at " + this.offset);
         out.node=node;
         return out;
       }
     }
   }
   /**
+    legay 06.2021, Offset correctur direkt in parser methoden
+
     bei der internen ablage in B&R Structs,
     wird ein folgendes element automatisch auf speicher-offset gelegt, die dem nächsten vielfachen der
     datentyp-speichergröße entsprechen
 
     !!!Ausnahme: Das gesamte strucht nimmt immer das nächste vielfache von 4 im speicher ein
      wenn das struct nur 1 byte untertypen enthällt, dann wird auch nicht korrigiert
-  */
+
    correctOffset (typestr){
      switch(typestr) {
        case 'BOOL':
@@ -211,18 +317,14 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
        while ((this.offset % 4)!=0)this.offset++;
        return 4;
        break;
-       /*case 'END_STRUCT':
-       //dynamische entscheidung, mit welchem modulo eine Korrektur nach strukterzeugung stattfinden muss
-       if (this.structByteCorrection > 0)
-        while ((this.offset % this.structByteCorrection)!=0)this.offset++;
-       break;*/
+
        default:
          if (typeof(typestr) == "undefined"){
            alert("atomar type identifier is undefined: " + typestr);
          }else
            alert("atomar type identifier: " + typestr + " unhandled");
          }
-     }
+     }  */
  /**
    fallunterscheidun für typstr
    Rückgabe true für atomare Basistypen
@@ -242,7 +344,7 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
       break;
       default:
         if (typeof(typestr) == "undefined"){
-          alert("atomar type identifier is undefined: " + typestr);
+          alert("atomar type identifier is undefined: "); //?? ob das wohl geht?
         }else if(typestr.indexOf("STRING")!=-1){//single string
           var lenStr= typestr.substr(typestr.indexOf('[')+1,typestr.length - 1);
           return parseInt(lenStr);
@@ -291,6 +393,8 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
     }
   }
   /**
+ Legacy 06.2021
+
     Erzeugt DOM-String der B&R Strukturentsprechung
     ein aufruf löst einen struct auf
     --noch nicht ganz durchentwickelt, aber prinzipiell machbar.
@@ -305,7 +409,7 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
     - seq
     ...
 
-  */
+
   toHtmlDOM(node,level){
     if (node==null){
       this.s='';
@@ -344,5 +448,5 @@ class BinaryBRTypedFile extends BinaryBRStructFile{
         alert("unhandled node type: " + typeof node + "in: " + nodeName);
       }
     }
-  }
+  }*/
 }
